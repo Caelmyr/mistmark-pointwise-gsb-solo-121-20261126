@@ -1,0 +1,16 @@
+name: solo124-mistmark
+services:
+  desk:
+    build:
+      context: .
+      args:
+        MISTMARK_DEPS_IMAGE: ${MISTMARK_DEPS_IMAGE:-python:3.11-slim}
+    image: ${MISTMARK_IMAGE:-solo124-mistmark:1.0}
+    network_mode: bridge
+    ports:
+      - "127.0.0.1:${MISTMARK_PORT:-19924}:8000"
+    volumes:
+      - measurements:/var/lib/mistmark
+    init: true
+volumes:
+  measurements:
