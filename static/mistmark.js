@@ -1,8 +1,12 @@
 "use strict";
 
 const get = (id) => document.getElementById(id);
-const state = {card: null, result: null, photo: null, probe: null, mode: "probe", chart: "profile", busy: false};
+const state = {card: null, result: null, photo: null, probe: null, mode: "probe", chart: "profile", focus: "dry", busy: false};
 const settings = [...document.querySelectorAll("[data-setting]")];
+
+function focusKey() {
+  return state.focus === "wet" ? "focus_wet" : "focus";
+}
 
 async function api(path, options) {
   const response = await fetch("/mistmark" + path, options);
@@ -16,7 +20,7 @@ function route(tail) {
 }
 
 function savedQuery() {
-  return "?revision=" + state.card.revision;
+  return "?revision=" + state.card.revision + "&focus=" + state.focus;
 }
 
 function notice(message, target = "notice") {
@@ -57,13 +61,34 @@ function paintSource() {
   canvas.height = card.height;
   ctx.drawImage(photo, 0, 0);
   const cfg = card.settings;
+  const segments = result.segments;
   ctx.lineWidth = 2;
   ctx.strokeStyle = "#77b7bd";
   ctx.setLineDash([6, 5]);
   ctx.strokeRect(cfg.left, cfg.top, cfg.right-cfg.left, cfg.bottom-cfg.top);
+  for (const [mode, color] of [[segments.wet, "#b9a2ef"], [segments.dry, "#a6d886"]]) {
+    const active = mode === (state.focus === "wet" ? segments.wet : segments.dry);
+    ctx.setLineDash(active ? [] : [3, 5]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = active ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(cfg.left, mode.focus);
+    ctx.lineTo(cfg.right, mode.focus);
+    ctx.stroke();
+    const picked = mode.picked;
+    if (picked) {
+      ctx.fillStyle = color;
+      for (const endpoint of [picked.start, picked.end]) {
+        ctx.beginPath();
+        ctx.arc(endpoint, mode.focus, active ? 4 : 3, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+  }
   ctx.setLineDash([]);
   if (result.profile.length) {
     ctx.strokeStyle = "#fadfc4";
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(cfg.left, result.focus);
     ctx.lineTo(cfg.right, result.focus);
@@ -76,6 +101,21 @@ function paintSource() {
       ctx.beginPath();
       ctx.arc(x, result.focus, 5, 0, 2 * Math.PI);
       ctx.stroke();
+    }
+  }
+  const picked = (state.focus === "wet" ? result.segments.wet : result.segments.dry).picked;
+  if (picked) {
+    ctx.strokeStyle = state.focus === "wet" ? "#b9a2ef" : "#a6d886";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(picked.start, result.focus);
+    ctx.lineTo(picked.end, result.focus);
+    ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle;
+    for (const endpoint of [picked.start, picked.end]) {
+      ctx.beginPath();
+      ctx.arc(endpoint, result.focus, 4, 0, 2 * Math.PI);
+      ctx.fill();
     }
   }
   if (probe) {
@@ -99,7 +139,8 @@ function paintChart() {
   const xAt = (x) => 45 + (width - 81) * (x - lo) / Math.max(1, hi - lo);
   const yAt = (y) => height - 26 - (height - 46) * y / upper;
   get("chart-title").textContent = byRow ? "各原行透见对比度" : "条卡截线亮度";
-  get("chart-caption").textContent = byRow ? "实测对比度 % · 原片 Y" : "真实源像素亮度 · 原片 X";
+  get("chart-caption").textContent = byRow ? "实测对比度 % · 原片 Y" :
+    (state.focus === "wet" ? "水珠下截线" : "干处截线") + " · 真实源像素亮度 · 原片 X";
   ctx.fillStyle = "#f7f8fb";
   ctx.fillRect(0,0,width,height);
   ctx.font = "12px monospace";
@@ -123,6 +164,22 @@ function paintChart() {
   });
   ctx.stroke();
   if (!byRow) {
+    const segments = result.segments;
+    for (const [mode, color] of [[segments.wet, "#b9a2ef"], [segments.dry, "#a6d886"]]) {
+      const picked = mode.picked;
+      if (!picked) continue;
+      const active = mode === (state.focus === "wet" ? segments.wet : segments.dry);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = active ? 3 : 1;
+      ctx.globalAlpha = active ? .85 : .45;
+      for (const endpoint of [picked.start, picked.end]) {
+        ctx.beginPath();
+        ctx.moveTo(xAt(endpoint), 12);
+        ctx.lineTo(xAt(endpoint), height - 26);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = "#ad7957";
     ctx.setLineDash([5,4]);
     ctx.beginPath();
@@ -137,6 +194,13 @@ function pointLabel(point) {
   const kind = point.highlight === null ? "框外" : (point.highlight ? "亮点" : "低于亮点下限");
   return "(" + point.x + ", " + point.y + ") · RGB " + point.rgb.join("/") +
     " · 亮度 " + point.brightness.toFixed(2) + " · " + kind;
+}
+
+function segmentLabel(mode) {
+  const picked = mode.picked;
+  if (!picked) return "本行未找到有证的明段";
+  return picked.start + "–" + picked.end + " · " + picked.width + " px · 中心 " + picked.center.toFixed(1) +
+    "（允许 " + (mode.center - mode.tolerance) + "–" + (mode.center + mode.tolerance) + "）";
 }
 
 function show() {
@@ -162,6 +226,11 @@ function show() {
     : "本行位于测量框外";
   get("area-level").textContent = "框内亮点 " + result.area.highlight_pixels + " / " + result.area.pixels +
     " · " + (result.area.fraction * 100).toFixed(2) + "%";
+  const segments = result.segments;
+  get("ratio-value").textContent = segments.ratio === null ? "—" : segments.ratio.toFixed(2);
+  get("ratio-unit").textContent = segments.ratio === null ? "倍" : "× 宽";
+  get("dry-level").textContent = "干处 Y " + segments.dry.focus + " · " + segmentLabel(segments.dry);
+  get("wet-level").textContent = "水珠下 Y " + segments.wet.focus + " · " + segmentLabel(segments.wet);
   for (const [id, filename] of Object.entries({proof: "proof.png", csv: "profile.csv", zip: "observation.zip"})) {
     get(id).href = "/mistmark" + route("/export/" + filename) + savedQuery();
   }
@@ -173,7 +242,8 @@ async function open(card) {
   const base = "/cards/" + card.id;
   const photo = new Image();
   photo.src = "/mistmark" + base + "/capture.png";
-  const [result] = await Promise.all([api(base + "/measurement?revision=" + card.revision), photo.decode()]);
+  const [result] = await Promise.all([api(base + "/measurement?revision=" + card.revision +
+                                            "&focus=" + state.focus), photo.decode()]);
   Object.assign(state, {card, result, photo, probe: null});
   get("library").value = card.id;
   show();
@@ -185,6 +255,13 @@ async function probe(x, y) {
   get("probe-y").value = y;
   get("probe-result").textContent = pointLabel(state.probe);
   paintSource();
+}
+
+async function measure() {
+  state.result = await api(route("/measurement") + savedQuery() + "&focus=" + state.focus);
+  get("probe-x").value = state.probe?.x ?? state.result.reading?.light_x ?? state.card.settings.left;
+  get("probe-y").value = state.probe?.y ?? state.result.focus;
+  show();
 }
 
 get("practice").addEventListener("click", () => action(async () => {
@@ -215,6 +292,14 @@ document.querySelectorAll("[data-mode]").forEach((button) => button.addEventList
   document.querySelectorAll("[data-mode]").forEach((item) =>
     item.setAttribute("aria-pressed", String(item === button)));
 }));
+document.querySelectorAll("[data-focus]").forEach((button) => button.addEventListener("click", () => {
+  action(async () => {
+    state.focus = button.dataset.focus;
+    document.querySelectorAll("[data-focus]").forEach((item) =>
+      item.setAttribute("aria-pressed", String(item === button)));
+    await measure();
+  });
+}));
 get("capture").addEventListener("click", (event) => {
   if (!state.card) return;
   const canvas = event.currentTarget;
@@ -224,8 +309,8 @@ get("capture").addEventListener("click", (event) => {
   action(async () => {
     await probe(x, y);
     if (state.mode === "mark") {
-      settings.find((field) => field.dataset.setting === "focus").value = y;
-      notice("已填入实际原片截线。");
+      settings.find((field) => field.dataset.setting === focusKey()).value = y;
+      notice("已填入" + (state.focus === "wet" ? "水珠下" : "干处") + "实际原片截线。");
     }
   });
 });

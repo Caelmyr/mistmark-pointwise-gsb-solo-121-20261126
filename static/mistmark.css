@@ -51,6 +51,13 @@ h2 { font-size: 15px; font-weight: 700; }
 .camera { display: flex; justify-content: center; align-items: center; background: #334c62; min-height: 170px; }
 #capture { display: block; max-width: 100%; max-height: 52vh; object-fit: contain; height: auto; cursor: crosshair; }
 .probe { padding: 11px 15px; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; border-top: 1px solid var(--line); }
+.row-modes { padding: 8px 15px; border-bottom: 1px solid var(--line); }
+.contrast-pair { border-top: 3px solid #8a74b8; }
+.contrast-pair .contrast strong { color: #71589c; }
+.contrast-pair p { padding: 0 15px 10px; }
+.dry-dot, .wet-dot { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 50%; vertical-align: 1px; }
+.dry-dot { background: #6f9c50; }
+.wet-dot { background: #9a7bd0; }
 .probe form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .probe input { width: 57px; height: 25px; padding: 2px 3px; }
 #probe-result, #measurement-state { color: var(--green); }

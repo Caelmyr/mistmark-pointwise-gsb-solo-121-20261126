@@ -42,6 +42,10 @@
             <button id="mark-mode" data-mode="mark" aria-pressed="false" type="button">取截线</button>
           </div>
         </div>
+        <div class="modes row-modes" role="group" aria-label="当前截线">
+          <button data-focus="dry" aria-pressed="true" type="button">干处截线</button>
+          <button data-focus="wet" aria-pressed="false" type="button">水珠下截线</button>
+        </div>
         <div class="camera"><canvas id="capture" aria-label="凝露原照，可点击取样或输入原片像素坐标"></canvas></div>
         <div class="probe">
           <b>原片点读</b>
@@ -68,6 +72,11 @@
         <div class="contrast"><strong id="contrast-value">—</strong><span id="contrast-unit"></span></div>
         <p id="selected-level"></p><p id="area-level"></p>
       </section>
+      <section class="panel contrast-pair">
+        <div class="panel-head"><h2>竖亮线宽度倍数</h2><span id="pair-caption">水珠下真宽 ÷ 干处真宽</span></div>
+        <div class="contrast"><strong id="ratio-value">—</strong><span id="ratio-unit"></span></div>
+        <p id="dry-level"></p><p id="wet-level"></p>
+      </section>
       <form id="calibration" class="panel settings">
         <div class="panel-head"><div><h2>测量框与亮点</h2><span>坐标使用原片像素，X 向右，Y 向下</span></div></div>
         <label class="wide">卡片名称<input id="name" maxlength="80" required></label>
@@ -75,8 +84,12 @@
           <label>左界 X<input data-setting="left" type="number" step="1" min="0" required></label>
           <label>右界 X<input data-setting="right" type="number" step="1" min="0" required></label>
           <label>截线 Y<input data-setting="focus" type="number" step="1" min="0" required></label>
+          <label>水珠下截线 Y<input data-setting="focus_wet" type="number" step="1" min="0" required></label>
           <label>上界 Y<input data-setting="top" type="number" step="1" min="0" required></label>
           <label>下界 Y<input data-setting="bottom" type="number" step="1" min="0" required></label>
+          <label>干处中心 X<input data-setting="center_dry" type="number" step="1" min="0" required></label>
+          <label>水珠下中心 X<input data-setting="center_wet" type="number" step="1" min="0" required></label>
+          <label>中心允差 px<input data-setting="tolerance" type="number" step="1" min="0" required></label>
         </div></fieldset>
         <fieldset><legend>亮点阈值</legend><div class="form-grid">
           <label>亮点下限<input data-setting="cutoff" type="number" step="1" min="1" max="254" required></label>

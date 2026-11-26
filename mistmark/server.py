@@ -61,7 +61,11 @@ def create_app(directory=None):
     def measurement(key):
         card = cards.read(key, request.args.get("revision"))
         image = mist.pixels(cards.photo(key))
-        return card, image, mist.report(image, card["settings"])
+        config = dict(card["settings"])
+        config["focus_dry"] = config["focus"]
+        if request.args.get("focus") in ("dry", "wet"):
+            config["focus"] = config[mist.row_key(request.args["focus"])]
+        return card, image, mist.report(image, config)
 
     @api.get("/cards/<key>/measurement")
     def measurement_json(key):

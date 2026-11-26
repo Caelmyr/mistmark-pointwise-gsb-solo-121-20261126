@@ -26,26 +26,42 @@ def proof(image, card, result):
     cfg = card["settings"]
     draw.rectangle((cfg["left"],cfg["top"],cfg["right"],cfg["bottom"]),outline="#559ea7",width=2)
     if result["profile"]:
-        draw.line((cfg["left"],cfg["focus"],cfg["right"],cfg["focus"]),fill="#dccbb5",width=1)
+        draw.line((cfg["left"],result["focus"],cfg["right"],result["focus"]),fill="#dccbb5",width=1)
+    stripes = result["segments"]
+    for mode, color in ((stripes["dry"], "#9fd47e"), (stripes["wet"], "#c7a4ff")):
+        picked = mode["picked"]
+        if not picked:
+            continue
+        draw.line((picked["start"], mode["focus"], picked["end"], mode["focus"]),fill=color,width=2)
+        for x in (picked["start"], picked["end"]):
+            draw.ellipse((x-3,mode["focus"]-3,x+3,mode["focus"]+3),fill=color)
     reading = result["reading"]
     if reading:
         for x, color in ((reading["dark_x"], "#8cc6eb"),(reading["light_x"], "#e99957")):
-            draw.ellipse((x-4,cfg["focus"]-4,x+4,cfg["focus"]+4),outline=color,width=2)
-        detail = f'Source row {cfg["focus"]} | contrast {reading["contrast"]:.2%} | highlights {reading["highlights"]}'
+            draw.ellipse((x-4,result["focus"]-4,x+4,result["focus"]+4),outline=color,width=2)
+        detail = f'Source row {result["focus"]} | contrast {reading["contrast"]:.2%} | highlights {reading["highlights"]}'
     else:
         detail = "Current source row is outside the selected frame"
     area = result["area"]
     draw.text((14,height+13),detail,fill="#edf7f3")
     draw.text((14,height+35),f'Area highlights: {area["highlight_pixels"]} / {area["pixels"]}',fill="#f3d4a9")
+    if stripes["ratio"] is not None:
+        dry, wet = stripes["dry"]["picked"], stripes["wet"]["picked"]
+        draw.text((14,height+51),f'Wet/dry width: {wet["width"]} / {dry["width"]} px = {stripes["ratio"]:.2f}x',
+                  fill="#f3d4a9")
     return png(output)
 
 
 def package(card, original, image, result):
+    stripes = result["segments"]
+    summary = {"dry": {key: stripes["dry"][key] for key in ("focus", "center", "tolerance", "picked")},
+               "wet": {key: stripes["wet"][key] for key in ("focus", "center", "tolerance", "picked")},
+               "ratio": stripes["ratio"]}
     memory = BytesIO()
     with ZipFile(memory,"w",ZIP_DEFLATED) as stream:
         stream.writestr("glass.png",original)
-        stream.writestr("reading.json",json.dumps({"card":card,"reading":result["reading"],"area":result["area"]},
-                                                ensure_ascii=False,indent=2))
+        stream.writestr("reading.json",json.dumps({"card":card,"reading":result["reading"],"area":result["area"],
+                                                  "segments":summary},ensure_ascii=False,indent=2))
         stream.writestr("glass-profile.csv",trace_table(result))
         stream.writestr("glass-proof.png",proof(image,card,result))
     return memory.getvalue()
