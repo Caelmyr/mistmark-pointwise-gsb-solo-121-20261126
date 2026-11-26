@@ -67,7 +67,9 @@ class Cards:
         with self.lock:
             card = self.read(key, integer(value.get("revision"), "工作版本", 1))
             incoming = object_value(value.get("settings", {}), "凝露设置")
-            config = mist.settings({**card["settings"], **incoming}, (card["width"], card["height"]))
+            aliased = mist.canonicalize(incoming)
+            config = mist.settings({**card["settings"], **incoming, **aliased},
+                                   (card["width"], card["height"]))
             card.update(name=text(value.get("name", card["name"]), "凝露卡名称", 80, False),
                         settings=config, revision=card["revision"] + 1)
             self.commit(self.folder(key), card)

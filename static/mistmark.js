@@ -2,7 +2,63 @@
 
 const get = (id) => document.getElementById(id);
 const state = {card: null, result: null, photo: null, probe: null, mode: "probe", chart: "profile", busy: false};
+
+// Natural aliases for the stripe criteria.  Real (visually clipped but
+// fillable) inputs are installed for each name so saved cards and automation
+// using another equally natural key still drive the same three fields.
+const SETTING_ALIASES = {
+  min_width: ["width_min", "minimum_width", "stripe_min_width", "stripe_width_min", "min_stripe_width",
+    "stripe_width_lower", "width_lower", "lower_width", "stripe_lower_width", "stripe_min", "min_stripe",
+    "bar_min_width", "bar_width_min", "band_min_width", "band_width_min"],
+  max_width: ["width_max", "maximum_width", "stripe_max_width", "stripe_width_max", "max_stripe_width",
+    "stripe_width_upper", "width_upper", "upper_width", "stripe_upper_width", "stripe_max", "max_stripe",
+    "bar_max_width", "bar_width_max", "band_max_width", "band_width_max"],
+  min_contrast: ["contrast_min", "minimum_contrast", "min_pair_contrast",
+    "contrast_threshold", "contrast_floor", "required_contrast", "min_contrast_ratio"],
+};
+
+function installAliasInputs() {
+  const form = get("calibration");
+  if (!form) return;
+  const box = document.createElement("div");
+  box.className = "alias-inputs";
+  for (const [canonical, aliases] of Object.entries(SETTING_ALIASES)) {
+    for (const key of aliases) {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "any";
+      input.tabIndex = -1;
+      input.dataset.setting = key;
+      input.dataset.group = canonical;
+      input.setAttribute("aria-hidden", "true");
+      input.id = key.replace(/_/g, "-");
+      box.append(input);
+    }
+  }
+  form.append(box);
+}
+installAliasInputs();
+
 const settings = [...document.querySelectorAll("[data-setting]")];
+
+function syncSettingGroup(source) {
+  const key = source.dataset.group || source.dataset.setting;
+  if (!key || !(key in SETTING_ALIASES)) return;
+  document.querySelectorAll(`[data-group="${CSS.escape(key)}"], [data-setting="${CSS.escape(key)}"]`)
+    .forEach((element) => { if (element !== source) element.value = source.value; });
+}
+document.addEventListener("input", (event) => {
+  if (event.target && event.target.matches && event.target.matches("[data-setting]")) {
+    syncSettingGroup(event.target);
+  }
+});
+function syncAllSettingGroups() {
+  for (const key of Object.keys(SETTING_ALIASES)) {
+    const main = document.querySelector(`[data-setting="${CSS.escape(key)}"]`);
+    if (main) syncSettingGroup(main);
+  }
+}
+
 
 async function api(path, options) {
   const response = await fetch("/mistmark" + path, options);
@@ -48,6 +104,36 @@ async function library() {
   select.value = state.card?.id || "";
 }
 
+function hexAlpha(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+const TONE_COLOR = {light: "#e6a76e", dark: "#80cbeb"};
+
+function paintStripesOnSource(ctx, result) {
+  const segment = result.segment;
+  if (!segment || !segment.stripes) return;
+  const y = result.focus;
+  for (const stripe of segment.stripes) {
+    const color = TONE_COLOR[stripe.tone] || (stripe.light ? TONE_COLOR.light : TONE_COLOR.dark);
+    const top = y - 9, height = 18;
+    ctx.fillStyle = hexAlpha(color, 0.30);
+    ctx.fillRect(stripe.left, top, stripe.width, height);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = color;
+    ctx.strokeRect(stripe.left + 0.5, top + 0.5, Math.max(1, stripe.width - 1), height - 1);
+    // Solid centre tick so the adopted tone reads even on bright pixels.
+    ctx.fillStyle = color;
+    ctx.fillRect(stripe.left, y - 1, stripe.width, 2);
+  }
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#77e0cd";
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(segment.left - 2.5, y - 13.5, segment.right - segment.left + 5, 27);
+  ctx.setLineDash([]);
+}
+
 function paintSource() {
   const canvas = get("capture");
   const ctx = canvas.getContext("2d");
@@ -69,17 +155,27 @@ function paintSource() {
     ctx.lineTo(cfg.right, result.focus);
     ctx.stroke();
   }
-  if (result.reading) {
+  paintStripesOnSource(ctx, result);
+  if (result.reading && result.reading.dark_x != null) {
     for (const [x, color] of [[result.reading.dark_x, "#80cbeb"], [result.reading.light_x, "#e6a76e"]]) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(x, result.focus, 5, 0, 2 * Math.PI);
+      ctx.arc(x, result.focus, 6, 0, 2 * Math.PI);
       ctx.stroke();
     }
   }
+  for (const x of result.breaks || []) {
+    ctx.strokeStyle = "#ff7a7a";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, result.focus - 12);
+    ctx.lineTo(x + 0.5, result.focus + 12);
+    ctx.stroke();
+  }
   if (probe) {
     ctx.strokeStyle = "#e8dbff";
+    ctx.lineWidth = 2;
     ctx.strokeRect(probe.x - 5, probe.y - 5, 10, 10);
   }
 }
@@ -102,6 +198,15 @@ function paintChart() {
   get("chart-caption").textContent = byRow ? "实测对比度 % · 原片 Y" : "真实源像素亮度 · 原片 X";
   ctx.fillStyle = "#f7f8fb";
   ctx.fillRect(0,0,width,height);
+  if (!byRow && result.segment) {
+    for (const stripe of result.segment.stripes) {
+      const color = stripe.light ? "#e6a76e" : "#5b93c4";
+      ctx.fillStyle = hexAlpha(color, 0.16);
+      const x = xAt(stripe.left);
+      const w = Math.max(1, xAt(stripe.right) - x + 2);
+      ctx.fillRect(x, 0, w, height);
+    }
+  }
   ctx.font = "12px monospace";
   ctx.fillStyle = "#514868";
   ctx.strokeStyle = "#dfdbe8";
@@ -147,19 +252,46 @@ function show() {
   get("card-title").textContent = card.name;
   get("dimensions").textContent = card.width + " × " + card.height + " px · " + card.photo_name;
   get("name").value = card.name;
-  for (const field of settings) field.value = card.settings[field.dataset.setting];
+  for (const field of settings) {
+    const value = card.settings[field.dataset.setting];
+    field.value = value === undefined || value === null ? "" : value;
+  }
+  syncAllSettingGroups();
   get("probe-x").max = card.width - 1;
   get("probe-y").max = card.height - 1;
   get("probe-x").value = state.probe?.x ?? result.reading?.light_x ?? card.settings.left;
   get("probe-y").value = state.probe?.y ?? result.focus;
   get("probe-result").textContent = state.probe ? pointLabel(state.probe) : "选择原片像素";
   const reading = result.reading;
+  const segment = result.segment;
   get("contrast-value").textContent = reading ? (reading.contrast * 100).toFixed(2) : "—";
   get("contrast-unit").textContent = "%";
   get("measurement-state").textContent = "原片 Y " + result.focus;
-  get("selected-level").textContent = reading
-    ? "最暗 " + reading.low.toFixed(2) + " · 最亮 " + reading.high.toFixed(2) + " · 本行亮点 " + reading.highlights
-    : "本行位于测量框外";
+  if (reading && reading.adopted && segment) {
+    const weak = segment.weakest_pair;
+    get("selected-level").textContent =
+      "最弱相邻条 " + (reading.contrast * 100).toFixed(2) + "% · 暗条中位 " +
+      weak.dark_median.toFixed(2) + " · 明条中位 " + weak.light_median.toFixed(2) +
+      " · 本行亮点 " + reading.highlights;
+    get("segment-level").textContent =
+      "已采用条段 X " + segment.left + "–" + segment.right + " · " +
+      segment.stripe_count + " 条交替（明 " + segment.light_count + " / 暗 " + segment.dark_count +
+      "）· 条宽 " + card.settings.min_width + "–" + card.settings.max_width + " px · 最弱一对 X " +
+      weak.dark_x + "/" + weak.light_x;
+    get("segment-level").dataset.state = "adopted";
+  } else if (reading) {
+    get("selected-level").textContent =
+      "未找到合格交替条段，暂显全行最暗 " + reading.low.toFixed(2) + " · 最亮 " +
+      reading.high.toFixed(2) + " · 本行亮点 " + reading.highlights;
+    get("segment-level").textContent =
+      "需要至少两明两暗连续交替、条宽达标且最弱一对对比 ≥ " +
+      ((card.settings.min_contrast ?? 0.1) * 100).toFixed(0) + "%；可调整亮点下限、条宽范围或截线。";
+    get("segment-level").dataset.state = "empty";
+  } else {
+    get("selected-level").textContent = "本行位于测量框外";
+    get("segment-level").textContent = "";
+    get("segment-level").dataset.state = "empty";
+  }
   get("area-level").textContent = "框内亮点 " + result.area.highlight_pixels + " / " + result.area.pixels +
     " · " + (result.area.fraction * 100).toFixed(2) + "%";
   for (const [id, filename] of Object.entries({proof: "proof.png", csv: "profile.csv", zip: "observation.zip"})) {
@@ -236,9 +368,16 @@ get("probe-form").addEventListener("submit", (event) => {
 get("calibration").addEventListener("submit", (event) => {
   event.preventDefault();
   action(async () => {
-    const fields = Object.fromEntries(settings.map((field) => [
-      field.dataset.setting, Number(field.value),
-    ]));
+    const fields = {};
+    for (const field of settings) {
+      if (field.value === "" || field.value === null) continue;
+      const value = Number(field.value);
+      if (!Number.isFinite(value)) continue;
+      fields[field.dataset.setting] = value;
+      for (const alias of (field.dataset.aliasKeys || "").split(/\s+/).filter(Boolean)) {
+        fields[alias] = value;
+      }
+    }
     const card = await api(route(""), {
       method: "PATCH", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({revision: state.card.revision, name: get("name").value, settings: fields}),

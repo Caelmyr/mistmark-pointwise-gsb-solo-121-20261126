@@ -68,6 +68,18 @@ def create_app(directory=None):
         card, _, result = measurement(key)
         return jsonify(revision=card["revision"], **result)
 
+    @api.get("/cards/<key>/segment")
+    def segment_json(key):
+        card, _, result = measurement(key)
+        segment = result["segment"]
+        if segment is None:
+            return jsonify(revision=card["revision"], adopted=False, segment=None,
+                           segments=result["segments"], criteria=result["criteria"])
+        payload = {"revision": card["revision"], "segment": segment,
+                   "segments": result["segments"], "criteria": result["criteria"]}
+        payload.update(segment)  # top-level stripe fields (incl. adopted, stripes)
+        return jsonify(payload)
+
     @api.get("/cards/<key>/probe")
     def probe(key):
         card = cards.read(key, request.args.get("revision"))
